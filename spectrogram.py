@@ -1,22 +1,8 @@
 import numpy as np
+import sklearn
 import librosa
 
 import constants
-
-
-def compute_spectrogram(y, sr):
-    assert len(y.shape) == 1
-
-    if len(y) < constants.NUM_SAMPLES:
-        y = np.pad(y, (0, constants.NUM_SAMPLES - len(y)))
-
-    mel_spec = librosa.feature.melspectrogram(y,
-                                              sr=sr,
-                                              n_fft=constants.FRAME_SIZE,
-                                              hop_length=constants.HOP_SIZE,
-                                              n_mels=constants.NUM_BINS,
-                                              center=False)
-    return librosa.core.power_to_db(mel_spec).transpose()
 
     
 def compute_normal_spectrogram(y, sr):
@@ -38,7 +24,14 @@ def compute_normal_spectrogram(y, sr):
                                               fmin=constants.MIN_FREQ,
                                               fmax=constants.MAX_FREQ,
                                               center=False)
-    norm = np.log(mel_spec + 1e-15)
+
+    norm = librosa.core.power_to_db(mel_spec.transpose())
     norm -= norm.min()
     norm /= norm.max()
-    return norm.transpose()
+    
+    # zero all activations less than 0.5 and re-scale the others
+    norm -= norm[norm > 0.5].min()
+    norm /= norm.max()
+    norm = np.maximum(norm, np.zeros(norm.shape))
+    
+    return norm

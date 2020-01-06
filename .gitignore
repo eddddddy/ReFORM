@@ -1,6 +1,8 @@
 .idea
-data/
+embed_data/
 spectrogram_data/
+logs/
+checkpoints/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
