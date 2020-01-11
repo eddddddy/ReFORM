@@ -1,4 +1,6 @@
 .idea
+*.png
+*.exe
 embed_data/
 spectrogram_data/
 logs/

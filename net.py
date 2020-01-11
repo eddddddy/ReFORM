@@ -17,72 +17,46 @@ except RuntimeError as e:
     print(e)
 
 
-def pretrain_train_data_loader():
-    with open(os.path.join(os.path.dirname(__file__), 'spectrogram_data', 'train'), 'rb') as f:
-        try:
-            while True:
-                yield pickle.load(f)
-        except EOFError:
-            pass
-                
-                
-def pretrain_val_data_loader():
-    with open(os.path.join(os.path.dirname(__file__), 'spectrogram_data', 'validation'), 'rb') as f:
-        try:
-            while True:
-                yield pickle.load(f)
-        except EOFError:
-            pass
-            
-            
-def cluster_train_data_loader(batch_size):
+def train_data_loader(repeat=1):
     with open(os.path.join(os.path.dirname(__file__), 'spectrogram_data', 'train'), 'rb') as f:
         try:
             while True:
                 data = pickle.load(f)
-                for _ in range(batch_size):
+                for _ in range(repeat):
                     yield data
         except EOFError:
             pass
-            
-            
-def cluster_val_data_loader(batch_size):
-    with open(os.path.join(os.path.dirname(__file__), 'spectrogram_data', 'validation'), 'rb') as f:
-        try:
-            while True:
-                data = pickle.load(f)
-                for _ in range(batch_size):
-                    yield data
-        except EOFError:
-            pass
-            
-           
+
+
 def ConvBN(*args, **kwargs):
-    def _ConvBN(model):
+    def _ConvBN(model, training=True):
         model = layers.Conv2D(*args, **{k: v for k, v in kwargs.items() if k != 'name'}, name=f'conv_{kwargs["name"]}')(model)
-        model = layers.BatchNormalization(axis=-1, name=f'bn_{kwargs["name"]}')(model)
+        model = layers.BatchNormalization(axis=-1, trainable=training, name=f'bn_{kwargs["name"]}')(model, training=training)
         model = layers.ReLU()(model)
         return model
+
     return _ConvBN
 
 
 def ConvTransposeBN(*args, **kwargs):
-    def _ConvTransposeBN(model):
+    def _ConvTransposeBN(model, training=True):
         model = layers.Conv2DTranspose(*args, **{k: v for k, v in kwargs.items() if k != 'name'}, name=f'conv_transpose_{kwargs["name"]}')(model)
-        model = layers.BatchNormalization(axis=-1, name=f'bn_{kwargs["name"]}')(model)
+        model = layers.BatchNormalization(axis=-1, trainable=training, name=f'bn_{kwargs["name"]}')(model, training=training)
         model = layers.ReLU()(model)
         return model
+
     return _ConvTransposeBN
 
 
 class Net:
     NUM_EPOCHS = 10000
-    STEPS_PER_EPOCH = 256
-    BATCH_SIZE = 8
-        
+    STEPS_PER_EPOCH = 128
+    BATCH_SIZE_PRETRAIN = 256
+    BATCH_SIZE_CLUSTER = 32
+
     def __init__(self):
         self.model = None
-        
+
     @staticmethod
     def spreader(batch_size):
         """
@@ -91,11 +65,13 @@ class Net:
         vector in y_pred (i.e. it calculates how spread out the
         points of y_pred are)
         """
+
         def spread(y_true, y_pred):
             y_avg = tf.tile(tf.reduce_mean(y_pred, axis=0, keepdims=True), [batch_size, 1])
-            return tf.reduce_sum(tf.math.square(y_pred - y_avg), axis=[1, 2])
+            return tf.reduce_sum(tf.math.square(y_pred - y_avg), axis=1)
+
         return spread
-        
+
     @staticmethod
     def mse(y_true, y_pred):
         """
@@ -103,7 +79,7 @@ class Net:
            keras MSE doesn't behave the way we want it to)
         """
         return tf.reduce_sum(tf.math.square(y_pred - y_true), axis=[1, 2])
-        
+
     @staticmethod
     def input_layer():
         return layers.Input(shape=(NUM_FRAMES, NUM_BINS), name='input')
@@ -112,216 +88,170 @@ class Net:
         net_input = Net.input_layer()
         model = layers.Reshape((NUM_FRAMES, NUM_BINS, 1))(net_input)
 
-        conv1 = ConvBN(64, (11, 9), strides=(5, 4), padding='same', name='1')(model)
-        conv1_aux = layers.Conv2DTranspose(1, (11, 9), strides=(5, 4), activation='sigmoid', padding='same', name='aux1_1')(conv1)
+        conv1 = ConvBN(64, (11, 9), strides=(5, 4), padding='same', name=1)(model)
+        conv1_aux = layers.Conv2DTranspose(1, (7, 5), strides=(5, 4), activation='sigmoid', padding='same', name='aux1_1')(conv1)
         conv1_aux = layers.Reshape((NUM_FRAMES, NUM_BINS), name='conv1_aux')(conv1_aux)
 
-        conv2 = ConvBN(256, (9, 5), strides=(4, 2), padding='same', name='2')(conv1)
-        conv2_aux = ConvTransposeBN(64, (9, 5), strides=(4, 2), padding='same', name='aux2_1')(conv2)
-        conv2_aux = layers.Conv2DTranspose(1, (11, 9), strides=(5, 4), activation='sigmoid', padding='same', name='aux2_2')(conv2_aux)
+        conv2 = ConvBN(128, (9, 5), strides=(4, 2), padding='same', name=2)(conv1)
+        conv2_aux = ConvTransposeBN(64, (5, 3), strides=(4, 2), padding='same', name='aux2_1')(conv2)
+        conv2_aux = layers.Conv2DTranspose(1, (7, 5), strides=(5, 4), activation='sigmoid', padding='same', name='aux2_2')(conv2_aux)
         conv2_aux = layers.Reshape((NUM_FRAMES, NUM_BINS), name='conv2_aux')(conv2_aux)
 
-        conv3 = ConvBN(256, (5, 5), strides=(2, 2), padding='same', name='3')(conv2)
-        conv3_aux = ConvTransposeBN(256, (5, 5), strides=(2, 2), padding='same', name='aux3_1')(conv3)
-        conv3_aux = ConvTransposeBN(64, (9, 5), strides=(4, 2), padding='same', name='aux3_2')(conv3_aux)
-        conv3_aux = layers.Conv2DTranspose(1, (11, 9), strides=(5, 4), activation='sigmoid', padding='same', name='aux3_3')(conv3_aux)
+        conv3 = ConvBN(256, (9, 5), strides=(4, 2), padding='same', name=3)(conv2)
+        conv3_aux = ConvTransposeBN(128, (5, 3), strides=(4, 2), padding='same', name='aux3_1')(conv3)
+        conv3_aux = ConvTransposeBN(64, (5, 3), strides=(4, 2), padding='same', name='aux3_2')(conv3_aux)
+        conv3_aux = layers.Conv2DTranspose(1, (7, 5), strides=(5, 4), activation='sigmoid', padding='same', name='aux3_3')(conv3_aux)
         conv3_aux = layers.Reshape((NUM_FRAMES, NUM_BINS), name='conv3_aux')(conv3_aux)
 
-        conv4 = ConvBN(512, (5, 5), strides=(2, 2), padding='same', name='4')(conv3)
-        conv4_aux = ConvTransposeBN(256, (5, 5), strides=(2, 2), padding='same', name='aux4_1')(conv4)
-        conv4_aux = ConvTransposeBN(256, (5, 5), strides=(2, 2), padding='same', name='aux4_2')(conv4_aux)
-        conv4_aux = ConvTransposeBN(64, (9, 5), strides=(4, 2), padding='same', name='aux4_3')(conv4_aux)
-        conv4_aux = layers.Conv2DTranspose(1, (11, 9), strides=(5, 4), activation='sigmoid', padding='same', name='aux4_4')(conv4_aux)
+        conv4 = ConvBN(384, (5, 5), strides=(2, 2), padding='same', name=4)(conv3)
+        conv4_aux = ConvTransposeBN(256, (3, 3), strides=(2, 2), padding='same', name='aux4_1')(conv4)
+        conv4_aux = ConvTransposeBN(128, (5, 3), strides=(4, 2), padding='same', name='aux4_2')(conv4_aux)
+        conv4_aux = ConvTransposeBN(64, (5, 3), strides=(4, 2), padding='same', name='aux4_3')(conv4_aux)
+        conv4_aux = layers.Conv2DTranspose(1, (7, 5), strides=(5, 4), activation='sigmoid', padding='same', name='aux4_4')(conv4_aux)
         conv4_aux = layers.Reshape((NUM_FRAMES, NUM_BINS), name='conv4_aux')(conv4_aux)
-        
-        conv5 = ConvBN(512, (5, 5), strides=(2, 2), padding='same', name='5')(conv4)
-        conv5_aux = ConvTransposeBN(512, (5, 5), strides=(2, 2), padding='same', name='aux5_1')(conv5)
-        conv5_aux = ConvTransposeBN(256, (5, 5), strides=(2, 2), padding='same', name='aux5_2')(conv5_aux)
-        conv5_aux = ConvTransposeBN(256, (5, 5), strides=(2, 2), padding='same', name='aux5_3')(conv5_aux)
-        conv5_aux = ConvTransposeBN(64, (9, 5), strides=(4, 2), padding='same', name='aux5_4')(conv5_aux)
-        conv5_aux = layers.Conv2DTranspose(1, (11, 9), strides=(5, 4), activation='sigmoid', padding='same', name='aux5_5')(conv5_aux)
+
+        conv5 = ConvBN(512, (5, 5), strides=(2, 2), padding='same', name=5)(conv4)
+        conv5_aux = ConvTransposeBN(384, (3, 3), strides=(2, 2), padding='same', name='aux5_1')(conv5)
+        conv5_aux = ConvTransposeBN(256, (3, 3), strides=(2, 2), padding='same', name='aux5_2')(conv5_aux)
+        conv5_aux = ConvTransposeBN(128, (5, 3), strides=(4, 2), padding='same', name='aux5_3')(conv5_aux)
+        conv5_aux = ConvTransposeBN(64, (5, 3), strides=(4, 2), padding='same', name='aux5_4')(conv5_aux)
+        conv5_aux = layers.Conv2DTranspose(1, (7, 5), strides=(5, 4), activation='sigmoid', padding='same', name='aux5_5')(conv5_aux)
         conv5_aux = layers.Reshape((NUM_FRAMES, NUM_BINS), name='conv5_aux')(conv5_aux)
 
-        conv6 = ConvBN(1024, (5, 5), strides=(2, 2), padding='same', name='6')(conv5)
-        decoder = ConvTransposeBN(512, (5, 5), strides=(2, 2), padding='same', name='decoder_1')(conv6)
-        decoder = ConvTransposeBN(512, (5, 5), strides=(2, 2), padding='same', name='decoder_2')(decoder)
-        decoder = ConvTransposeBN(256, (5, 5), strides=(2, 2), padding='same', name='decoder_3')(decoder)
-        decoder = ConvTransposeBN(256, (5, 5), strides=(2, 2), padding='same', name='decoder_4')(decoder)
-        decoder = ConvTransposeBN(64, (9, 5), strides=(4, 2), padding='same', name='decoder_5')(decoder)
-        decoder = layers.Conv2DTranspose(1, (11, 9), strides=(5, 4), activation='sigmoid', padding='same', name='decoder_6')(decoder)
+        conv6 = ConvBN(768, (5, 5), strides=(2, 2), padding='same', name=6)(conv5)
+        decoder = ConvTransposeBN(512, (3, 3), strides=(2, 2), padding='same', name='decoder_1')(conv6)
+        decoder = ConvTransposeBN(384, (3, 3), strides=(2, 2), padding='same', name='decoder_2')(decoder)
+        decoder = ConvTransposeBN(256, (3, 3), strides=(2, 2), padding='same', name='decoder_3')(decoder)
+        decoder = ConvTransposeBN(128, (5, 3), strides=(4, 2), padding='same', name='decoder_4')(decoder)
+        decoder = ConvTransposeBN(64, (5, 3), strides=(4, 2), padding='same', name='decoder_5')(decoder)
+        decoder = layers.Conv2DTranspose(1, (7, 5), strides=(5, 4), activation='sigmoid', padding='same', name='decoder_6')(decoder)
         decoder = layers.Reshape((NUM_FRAMES, NUM_BINS), name='decoder')(decoder)
-        
+
         net_outputs = [conv1_aux, conv2_aux, conv3_aux, conv4_aux, conv5_aux, decoder]
 
         self.model = models.Model(inputs=net_input, outputs=net_outputs)
         self.model.compile(optimizer=optimizers.Adam(learning_rate=1e-2),
                            loss=Net.mse,
-                           loss_weights={'conv1_aux': 0.1, 'conv2_aux': 0.2, 'conv3_aux': 0.6, 'conv4_aux': 0.8, 'conv5_aux': 0.9, 'decoder': 1})
-                           
+                           loss_weights={'conv1_aux': 0.1, 'conv2_aux': 0.2, 'conv3_aux': 0.3, 'conv4_aux': 0.4, 'conv5_aux': 0.6, 'decoder': 1})
+
     def construct_for_clustering(self):
         net_input = Net.input_layer()
         model = layers.Reshape((NUM_FRAMES, NUM_BINS, 1))(net_input)
-        
-        model = ConvBN(64, (11, 9), strides=(5, 4), padding='same', name='1')(model)
-        model = ConvBN(256, (9, 5), strides=(4, 2), padding='same', name='2')(model)
-        model = ConvBN(256, (5, 5), strides=(2, 2), padding='same', name='3')(model)
-        model = ConvBN(512, (5, 5), strides=(2, 2), padding='same', name='4')(model)
-        model = ConvBN(512, (5, 5), strides=(2, 2), padding='same', name='5')(model)
-        model = ConvBN(1024, (5, 5), strides=(2, 2), padding='same', name='6')(model)
 
-        embedded = layers.Reshape((NUM_FRAMES * NUM_BINS // 40,), name='embedded')(model)
-        
-        decoder = ConvTransposeBN(512, (5, 5), strides=(2, 2), padding='same', name='decoder_1')(conv6)
-        decoder = ConvTransposeBN(512, (5, 5), strides=(2, 2), padding='same', name='decoder_2')(decoder)
-        decoder = ConvTransposeBN(256, (5, 5), strides=(2, 2), padding='same', name='decoder_3')(decoder)
-        decoder = ConvTransposeBN(256, (5, 5), strides=(2, 2), padding='same', name='decoder_4')(decoder)
-        decoder = ConvTransposeBN(64, (9, 5), strides=(4, 2), padding='same', name='decoder_5')(decoder)
-        decoder = layers.Conv2DTranspose(1, (11, 9), strides=(5, 4), activation='sigmoid', padding='same', name='decoder_6')(decoder)
+        model = ConvBN(64, (11, 9), strides=(5, 4), padding='same', name=1)(model, training=False)
+        model = ConvBN(128, (9, 5), strides=(4, 2), padding='same', name=2)(model, training=False)
+        model = ConvBN(256, (9, 5), strides=(4, 2), padding='same', name=3)(model, training=False)
+        model = ConvBN(384, (5, 5), strides=(2, 2), padding='same', name=4)(model, training=False)
+        model = ConvBN(512, (5, 5), strides=(2, 2), padding='same', name=5)(model, training=False)
+        model = ConvBN(768, (5, 5), strides=(2, 2), padding='same', name=6)(model, training=False)
+
+        embedded = layers.Reshape((NUM_FRAMES * NUM_BINS * 3 // 320,), name='embedded')(model)
+
+        decoder = ConvTransposeBN(512, (3, 3), strides=(2, 2), padding='same', name='decoder_1')(model, training=False)
+        decoder = ConvTransposeBN(384, (3, 3), strides=(2, 2), padding='same', name='decoder_2')(decoder, training=False)
+        decoder = ConvTransposeBN(256, (3, 3), strides=(2, 2), padding='same', name='decoder_3')(decoder, training=False)
+        decoder = ConvTransposeBN(128, (5, 3), strides=(4, 2), padding='same', name='decoder_4')(decoder, training=False)
+        decoder = ConvTransposeBN(64, (5, 3), strides=(4, 2), padding='same', name='decoder_5')(decoder, training=False)
+        decoder = layers.Conv2DTranspose(1, (7, 5), strides=(5, 4), activation='sigmoid', padding='same', name='decoder_6')(decoder)
         decoder = layers.Reshape((NUM_FRAMES, NUM_BINS), name='decoder')(decoder)
-        
+
         net_outputs = [embedded, decoder]
-        
-        spread = Net.spreader(Net.BATCH_SIZE)
+
+        spread = Net.spreader(Net.BATCH_SIZE_CLUSTER)
 
         self.model = models.Model(inputs=net_input, outputs=net_outputs)
-        self.model.compile(optimizer=optimizers.Adam(learning_rate=1e-3),
+        self.model.compile(optimizer=optimizers.Adam(learning_rate=1e-2),
                            loss={'embedded': spread, 'decoder': Net.mse},
                            loss_weights={'embedded': 0.05, 'decoder': 1})
-        
+
     def construct_for_embedding(self):
         net_input = Net.input_layer()
         model = layers.Reshape((NUM_FRAMES, NUM_BINS, 1))(net_input)
 
-        model = ConvBN(64, (11, 9), strides=(5, 4), padding='same', name='1')(model)
-        model = ConvBN(256, (9, 5), strides=(4, 2), padding='same', name='2')(model)
-        model = ConvBN(256, (5, 5), strides=(2, 2), padding='same', name='3')(model)
-        model = ConvBN(512, (5, 5), strides=(2, 2), padding='same', name='4')(model)
-        model = ConvBN(512, (5, 5), strides=(2, 2), padding='same', name='5')(model)
-        model = ConvBN(1024, (5, 5), strides=(2, 2), padding='same', name='6')(model)
+        model = ConvBN(64, (11, 9), strides=(5, 4), padding='same', name='1')(model, training=False)
+        model = ConvBN(128, (9, 5), strides=(4, 2), padding='same', name='2')(model, training=False)
+        model = ConvBN(256, (9, 5), strides=(4, 2), padding='same', name='3')(model, training=False)
+        model = ConvBN(384, (5, 5), strides=(2, 2), padding='same', name='4')(model, training=False)
+        model = ConvBN(512, (5, 5), strides=(2, 2), padding='same', name='5')(model, training=False)
+        model = ConvBN(768, (5, 5), strides=(2, 2), padding='same', name='6')(model, training=False)
 
-        net_output = layers.Reshape((NUM_FRAMES * NUM_BINS // 40,), name='embedded')(model)
+        net_output = layers.Reshape((NUM_FRAMES * NUM_BINS * 3 // 320,), name='embedded')(model)
 
         self.model = models.Model(inputs=net_input, outputs=net_output)
-                           
+
     def load_weights(self, filepath):
         self.model.load_weights(filepath, by_name=True)
-        
+
     def predict(self, x):
         return self.model.predict(x)
-                       
+
     def pretrain(self):
         def __slice_n_dice(data):
             data_offset = tf.random.uniform([], 0, len(data) - NUM_FRAMES + 1, dtype=tf.int32)
             new_data = data[data_offset: data_offset + NUM_FRAMES]
-            #return new_data, new_data
-            return new_data, {'conv1_aux': new_data, 'conv2_aux': new_data, 'conv3_aux': new_data, 'conv4_aux': new_data, 'conv5_aux': new_data}
-    
+            return new_data, {'conv1_aux': new_data, 'conv2_aux': new_data, 'conv3_aux': new_data, 'conv4_aux': new_data, 'conv5_aux': new_data, 'decoder': new_data}
+
         train_dataset = tf.data.Dataset.from_generator(
-            pretrain_train_data_loader,
+            train_data_loader,
             output_types=tf.float64,
             output_shapes=tf.TensorShape([None, NUM_BINS])
         )
-        train_dataset = train_dataset.shuffle(Net.BATCH_SIZE * 4, reshuffle_each_iteration=True)
+        train_dataset = train_dataset.shuffle(Net.BATCH_SIZE_PRETRAIN * 4)
         train_dataset = train_dataset.repeat()
         train_dataset = train_dataset.map(__slice_n_dice, num_parallel_calls=tf.data.experimental.AUTOTUNE)
-        train_dataset = train_dataset.batch(Net.BATCH_SIZE)
-        train_dataset = train_dataset.prefetch(Net.BATCH_SIZE * 4)
-        
-        '''val_dataset = tf.data.Dataset.from_generator(
-            pretrain_val_data_loader,
-            output_types=tf.float64,
-            output_shapes=tf.TensorShape([None, NUM_BINS])
-        )
-        val_dataset = val_dataset.repeat()
-        val_dataset = val_dataset.map(__slice_n_dice, num_parallel_calls=tf.data.experimental.AUTOTUNE)
-        val_dataset = val_dataset.batch(Net.BATCH_SIZE)
-        val_dataset = val_dataset.prefetch(Net.BATCH_SIZE * 4)'''
-        
+        train_dataset = train_dataset.batch(Net.BATCH_SIZE_PRETRAIN)
+        train_dataset = train_dataset.prefetch(Net.BATCH_SIZE_PRETRAIN * 4)
+
         checkpoint_callback = callbacks.ModelCheckpoint(
-            os.path.join(os.path.dirname(__file__), 'checkpoints', 'checkpoint-pretrain-epoch{epoch:05d}.hdf5'),
-            period=2
+            os.path.join(os.path.dirname(__file__), 'checkpoints', 'weights-pretrain.hdf5'),
+            save_weights_only=True
         )
-        
-        #weights_callback = callbacks.ModelCheckpoint(
-        #    os.path.join(os.path.dirname(__file__), 'checkpoints', 'weights-pretrain-epoch{epoch:05d}.hdf5'),
-        #    save_weights_only=True,
-        #    period=2
-        #)
-        
-        reduce_lr_callback = callbacks.ReduceLROnPlateau(
-            monitor='loss',   # monitor train loss instead of validation loss
-            factor=0.1,   #
-            patience=16,   #
-            verbose=1,
-            cooldown=3    #
-        )
-        
+
         tensorboard_callback = callbacks.TensorBoard(
             log_dir='logs',
             write_graph=False,
             profile_batch=5
         )
-        
+
         self.model.fit(x=train_dataset,
                        epochs=Net.NUM_EPOCHS,
                        steps_per_epoch=Net.STEPS_PER_EPOCH,
                        callbacks=[checkpoint_callback,
-                                  #weights_callback,
-                                  reduce_lr_callback,
                                   tensorboard_callback],
                        verbose=1,
-                       #validation_data=val_dataset,
-                       #validation_steps=8,
-                       #validation_freq=10,
                        use_multiprocessing=True)
-                       
+
     def cluster(self):
         def __slice_n_dice(data):
             data_offset = tf.random.uniform([], 0, len(data) - NUM_FRAMES + 1, dtype=tf.int32)
             new_data = data[data_offset: data_offset + NUM_FRAMES]
-            return new_data, {'embedded': np.zeros(128) , 'reconstruction': new_data}
-        
+            return new_data, {'embedded': np.zeros(768), 'decoder': new_data}
+
         train_dataset = tf.data.Dataset.from_generator(
-            cluster_train_data_loader,
+            train_data_loader,
             output_types=tf.float64,
             output_shapes=tf.TensorShape([None, NUM_BINS]),
-            args=(Net.BATCH_SIZE,)
+            args=(Net.BATCH_SIZE_CLUSTER,)
         )
         train_dataset = train_dataset.map(__slice_n_dice, num_parallel_calls=tf.data.experimental.AUTOTUNE)
-        train_dataset = train_dataset.batch(Net.BATCH_SIZE)
-        train_dataset = train_dataset.prefetch(Net.BATCH_SIZE * 4)
-        
+        train_dataset = train_dataset.batch(Net.BATCH_SIZE_CLUSTER)
+        train_dataset = train_dataset.prefetch(Net.BATCH_SIZE_CLUSTER * 4)
+
         checkpoint_callback = callbacks.ModelCheckpoint(
-            os.path.join(os.path.dirname(__file__), 'checkpoints', 'checkpoint-cluster-2b-1d-epoch{epoch:05d}-adam-lr=1e-1.hdf5'),
-            period=10
-        )
-        
-        weights_callback = callbacks.ModelCheckpoint(
-            os.path.join(os.path.dirname(__file__), 'checkpoints', 'weights-cluster-2b-1d-epoch{epoch:05d}-adam-lr=1e-1.hdf5'),
+            os.path.join(os.path.dirname(__file__), 'checkpoints', 'weights-cluster.hdf5'),
             save_weights_only=True,
-            period=10
+            period=5
         )
-        
-        reduce_lr_callback = callbacks.ReduceLROnPlateau(
-            monitor='loss',   # monitor train loss instead of validation loss
-            factor=0.5,
-            patience=80,
-            verbose=1,
-            min_delta=1e-5,
-            cooldown=20
-        )
-        
+
         tensorboard_callback = callbacks.TensorBoard(
             log_dir='logs',
             write_graph=False,
             profile_batch=5
         )
-        
+
         self.model.fit(x=train_dataset,
                        epochs=Net.NUM_EPOCHS,
                        callbacks=[checkpoint_callback,
-                                  weights_callback,
-                                  reduce_lr_callback,
                                   tensorboard_callback],
                        verbose=1,
                        use_multiprocessing=True)
@@ -329,13 +259,15 @@ class Net:
 
 def main():
     net = Net()
+
     net.construct_for_pretraining()
-    net.pretrain()
-    
-    #net = Net()
-    #net.construct_for_clustering()
-    #net.load_weights('checkpoints/weights-2b-1d-epoch00830-adam-lr=1e-1.hdf5')
-    #net.cluster()
+    tf.keras.utils.plot_model(net.model, to_file='model_pretrain.png', show_shapes=True)
+
+    net.construct_for_clustering()
+    tf.keras.utils.plot_model(net.model, to_file='model_cluster.png', show_shapes=True)
+
+    net.construct_for_embedding()
+    tf.keras.utils.plot_model(net.model, to_file='model_embed.png', show_shapes=True)
 
 
 if __name__ == '__main__':
