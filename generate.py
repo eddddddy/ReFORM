@@ -24,10 +24,6 @@ def load(file):
     return y, fs
 
 
-def get_counts(arr):
-    return np.array([((arr > a) & (arr < (a + 0.1))).sum() for a in np.arange(0, 1, 0.1)])
-
-
 def generate_worker(song_queue, data_queue):
     try:
         while True:
@@ -52,7 +48,7 @@ def generate_worker(song_queue, data_queue):
 
 
 def generate():
-    with open(os.path.join(os.path.dirname(__file__), 'spectrogram_data', 'mapping.yaml')) as mapping:
+    with open(os.path.join(os.path.dirname(__file__), 'mapping.yaml')) as mapping:
         all_data = yaml.safe_load(mapping)
 
     high = int(1 / VALIDATION_RATIO)
@@ -64,7 +60,6 @@ def generate():
     validation_output_file = os.path.join(os.path.dirname(__file__), 'spectrogram_data', 'validation')
     all_output_file = os.path.join(os.path.dirname(__file__), 'spectrogram_data', 'all')
 
-    cum_counts = np.zeros(10, dtype=np.int32)
     workers = []
     num_workers = 8
     song_queue = multiprocessing.Queue()
@@ -81,7 +76,7 @@ def generate():
             for album in albums:
                 songs = albums[album]
                 for song in songs:
-                    song_queue.put((artist, album, song))
+                    song_queue.put((artist, album, song['name']))
 
         for _ in range(num_workers):
             workers.append(multiprocessing.Process(target=generate_worker, args=(song_queue, data_queue)))
@@ -92,12 +87,10 @@ def generate():
         while True:
             try:
                 artist, album, song, spectrogram1, spectrogram2 = data_queue.get(False)
+                song_str = f'{artist}.{album}.{song}'
                 (validation_data if np.random.randint(1, high) == 1 else train_data).append(spectrogram1)
                 (validation_data if np.random.randint(1, high) == 1 else train_data).append(spectrogram2)
-                data.extend([spectrogram1, song, spectrogram2, song])
-
-                cum_counts += get_counts(spectrogram1) + get_counts(spectrogram2)
-                print(cum_counts)
+                data.extend([spectrogram1, song_str, spectrogram2, song_str])
 
                 if len(train_data) > 10:
                     for song_data in train_data:

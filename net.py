@@ -81,6 +81,64 @@ class Net:
         return tf.reduce_sum(tf.math.square(y_pred - y_true), axis=[1, 2])
 
     @staticmethod
+    def random_slice(data, length):
+        data_offset = tf.random.uniform([], 0, length - NUM_FRAMES + 1, dtype=tf.int32)
+        return data[data_offset: data_offset + NUM_FRAMES]
+
+    @staticmethod
+    def get_pretrain_dataset():
+        def __slice_n_dice(data, length):
+            data_offset = tf.random.uniform([], 0, length - NUM_FRAMES + 1, dtype=tf.int32)
+            new_data = data[data_offset: data_offset + NUM_FRAMES]
+            return new_data, {'conv1_aux': new_data, 'conv2_aux': new_data, 'conv3_aux': new_data, 'conv4_aux': new_data, 'conv5_aux': new_data, 'decoder': new_data}
+
+        data = list(train_data_loader())
+        lengths = np.array([len(d) for d in data])
+        for i in range(len(data)):
+            data[i] = np.pad(data[i], [(0, 35000 - len(data[i])), (0, 0)])
+        data = np.array(data)
+
+        data = tf.convert_to_tensor(data[100:])
+        lengths = tf.convert_to_tensor(lengths[100:])
+
+        '''data1 = tf.convert_to_tensor(data[:100])
+        lengths1 = tf.convert_to_tensor(lengths[:100])
+        data2 = tf.convert_to_tensor(data[100:])
+        lengths2 = tf.convert_to_tensor(lengths[100:])'''
+
+        '''dataset1 = tf.data.Dataset.range(8).interleave(
+            lambda x: tf.data.Dataset.zip((
+                tf.data.Dataset.from_tensor_slices(data1[x::8]),
+                tf.data.Dataset.from_tensor_slices(lengths1[x::8])
+            )),
+            cycle_length=8,
+            num_parallel_calls=8
+        )
+        dataset2 = tf.data.Dataset.range(8).interleave(
+            lambda x: tf.data.Dataset.zip((
+                tf.data.Dataset.from_tensor_slices(data2[x::8]),
+                tf.data.Dataset.from_tensor_slices(lengths2[x::8])
+            )),
+            cycle_length=8,
+            num_parallel_calls=8
+        )'''
+        dataset = tf.data.Dataset.range(4).interleave(
+            lambda x: tf.data.Dataset.zip((
+                tf.data.Dataset.from_tensor_slices(data[x::8]),
+                tf.data.Dataset.from_tensor_slices(lengths[x::8])
+            )),
+            cycle_length=4,
+            num_parallel_calls=4
+        )
+        #dataset = dataset1.concatenate(dataset2)
+        dataset = dataset.repeat()
+        dataset = dataset.map(__slice_n_dice, num_parallel_calls=tf.data.experimental.AUTOTUNE)
+        dataset = dataset.batch(Net.BATCH_SIZE_PRETRAIN)
+        dataset = dataset.prefetch(Net.BATCH_SIZE_PRETRAIN * 4)
+
+        return dataset
+
+    @staticmethod
     def input_layer():
         return layers.Input(shape=(NUM_FRAMES, NUM_BINS), name='input')
 
@@ -196,11 +254,13 @@ class Net:
             output_types=tf.float64,
             output_shapes=tf.TensorShape([None, NUM_BINS])
         )
-        train_dataset = train_dataset.shuffle(Net.BATCH_SIZE_PRETRAIN * 4)
+        #train_dataset = train_dataset.shuffle(Net.BATCH_SIZE_PRETRAIN * 4)
         train_dataset = train_dataset.repeat()
         train_dataset = train_dataset.map(__slice_n_dice, num_parallel_calls=tf.data.experimental.AUTOTUNE)
         train_dataset = train_dataset.batch(Net.BATCH_SIZE_PRETRAIN)
         train_dataset = train_dataset.prefetch(Net.BATCH_SIZE_PRETRAIN * 4)
+
+        #train_dataset = Net.get_pretrain_dataset()
 
         checkpoint_callback = callbacks.ModelCheckpoint(
             os.path.join(os.path.dirname(__file__), 'checkpoints', 'weights-pretrain.hdf5'),
@@ -262,6 +322,8 @@ def main():
 
     net.construct_for_pretraining()
     tf.keras.utils.plot_model(net.model, to_file='model_pretrain.png', show_shapes=True)
+    net.construct_for_pretraining()
+    net.pretrain()
 
     net.construct_for_clustering()
     tf.keras.utils.plot_model(net.model, to_file='model_cluster.png', show_shapes=True)

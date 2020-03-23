@@ -175,5 +175,5 @@ def compute_similarities(vectors):
     similarities = []
     for name in os.listdir(os.path.join(os.path.dirname(__file__), 'embed_data')):
         similarities.append([name, compute_similarity(vectors, load_embeddings(name))])
-    similarities = sorted(similarities, key=lambda p: p[1])
+    similarities = sorted(similarities, key=lambda p: p[0])
     return similarities
