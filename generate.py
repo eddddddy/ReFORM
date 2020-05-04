@@ -17,6 +17,12 @@ import spectrogram
 VALIDATION_RATIO = 0.1
 DATA_PATH = "D:/Data"
 
+TRAIN_OUTPUT_FILEPATH = os.path.join(os.path.dirname(__file__), 'spectrogram_data', 'train')
+VALIDATION_OUTPUT_FILEPATH = os.path.join(os.path.dirname(__file__), 'spectrogram_data', 'validation')
+ALL_OUTPUT_FILEPATH = os.path.join(os.path.dirname(__file__), 'spectrogram_data', 'all')
+
+NUM_THREADS = 8
+
 
 def load(file):
     fs, y = wavfile.read(file)
@@ -24,12 +30,15 @@ def load(file):
     return y, fs
 
 
+def get_nth_train_filepath(n):
+    return os.path.join(os.path.dirname(__file__), 'spectrogram_data', f'train{n}')
+
+
 def generate_worker(song_queue, data_queue):
     try:
         while True:
             song_info = song_queue.get(True)
             if not song_info:
-                song_queue.put(None)
                 return
 
             artist, album, song = song_info
@@ -56,21 +65,16 @@ def generate():
     train_data = []
     validation_data = []
     data = []
-    train_output_file = os.path.join(os.path.dirname(__file__), 'spectrogram_data', 'train')
-    validation_output_file = os.path.join(os.path.dirname(__file__), 'spectrogram_data', 'validation')
-    all_output_file = os.path.join(os.path.dirname(__file__), 'spectrogram_data', 'all')
 
     workers = []
-    num_workers = 8
     song_queue = multiprocessing.Queue()
     data_queue = multiprocessing.Queue()
 
     try:
-        train_file = open(train_output_file, 'wb')
-        validation_file = open(validation_output_file, 'wb')
-        all_file = open(all_output_file, 'wb')
+        train_file = open(TRAIN_OUTPUT_FILEPATH, 'wb')
+        validation_file = open(VALIDATION_OUTPUT_FILEPATH, 'wb')
+        all_file = open(ALL_OUTPUT_FILEPATH, 'wb')
 
-        song_queue.put(None)
         for artist in all_data:
             albums = all_data[artist]
             for album in albums:
@@ -78,8 +82,9 @@ def generate():
                 for song in songs:
                     song_queue.put((artist, album, song['name']))
 
-        for _ in range(num_workers):
+        for _ in range(NUM_THREADS):
             workers.append(multiprocessing.Process(target=generate_worker, args=(song_queue, data_queue)))
+            song_queue.put(None)
 
         for worker in workers:
             worker.start()
@@ -127,6 +132,28 @@ def generate():
         validation_file.close()
         all_file.close()
 
+        
+def split_data():
+    """
+    Create NUM_THREADS equal-sized training files that collectively contain
+    all the training data in the training output file of a generate() call
+    """
+    try:
+        train_files = [open(get_nth_train_filepath(i), 'wb') for i in range(NUM_THREADS)]
+        
+        with open(TRAIN_OUTPUT_FILEPATH, 'rb') as f:
+            i = 0
+            try:
+                while True:
+                    pickle.dump(pickle.load(f), train_files[i])
+                    i = (i + 1) % NUM_THREADS
+            except EOFError:
+                pass
+    finally:
+        for train_file in train_files:
+            train_file.close()
+        
 
 if __name__ == '__main__':
     generate()
+    split_data()

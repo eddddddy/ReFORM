@@ -6,6 +6,7 @@ from tensorflow.keras import layers, models, optimizers, backend, callbacks
 import numpy as np
 
 from constants import *
+import generate
 
 tf.compat.v1.disable_eager_execution()
 
@@ -18,12 +19,21 @@ except RuntimeError as e:
 
 
 def train_data_loader(repeat=1):
-    with open(os.path.join(os.path.dirname(__file__), 'spectrogram_data', 'train'), 'rb') as f:
+    with open(generate.TRAIN_OUTPUT_FILEPATH, 'rb') as f:
         try:
             while True:
                 data = pickle.load(f)
                 for _ in range(repeat):
                     yield data
+        except EOFError:
+            pass
+            
+            
+def split_train_data_loader(filename):
+    with open(filename, 'rb') as f:
+        try:
+            while True:
+                data = pickle.load(f)
         except EOFError:
             pass
 
@@ -81,11 +91,6 @@ class Net:
         return tf.reduce_sum(tf.math.square(y_pred - y_true), axis=[1, 2])
 
     @staticmethod
-    def random_slice(data, length):
-        data_offset = tf.random.uniform([], 0, length - NUM_FRAMES + 1, dtype=tf.int32)
-        return data[data_offset: data_offset + NUM_FRAMES]
-
-    @staticmethod
     def get_pretrain_dataset():
         def __slice_n_dice(data, length):
             data_offset = tf.random.uniform([], 0, length - NUM_FRAMES + 1, dtype=tf.int32)
@@ -136,6 +141,32 @@ class Net:
         dataset = dataset.batch(Net.BATCH_SIZE_PRETRAIN)
         dataset = dataset.prefetch(Net.BATCH_SIZE_PRETRAIN * 4)
 
+        return dataset
+    
+    @staticmethod
+    def get_pretrain_dataset_new():
+        def slice_n_dice(data):
+            data_offset = tf.random.uniform([], 0, len(data) - NUM_FRAMES + 1, dtype=tf.int32)
+            new_data = data[data_offset: data_offset + NUM_FRAMES]
+            return new_data, new_data
+            
+        def dataset_from_filename(filename):
+            return tf.data.Dataset.from_generator(
+                split_train_data_loader,
+                output_types=tf.float64,
+                output_shapes=tf.TensorShape([None, NUM_BINS]),
+                args=(filename,)
+            )
+        
+        train_files = [generate.get_nth_train_filepath(i) for i in range(generate.NUM_THREADS)]
+        dataset = tf.data.Dataset.from_tensor_slices(train_files)
+        dataset = dataset.interleave(dataset_from_filename, cycle_length=generate.NUM_THREADS)
+        dataset = dataset.repeat()
+        dataset = dataset.shuffle(Net.BATCH_SIZE_PRETRAIN * 4)
+        dataset = dataset.map(slice_n_dice)
+        dataset = dataset.batch(Net.BATCH_SIZE_PRETRAIN)
+        dataset = dataset.prefetch(Net.BATCH_SIZE_PRETRAIN * 4)
+        
         return dataset
 
     @staticmethod
@@ -188,7 +219,7 @@ class Net:
         net_outputs = [conv1_aux, conv2_aux, conv3_aux, conv4_aux, conv5_aux, decoder]
 
         self.model = models.Model(inputs=net_input, outputs=net_outputs)
-        self.model.compile(optimizer=optimizers.Adam(learning_rate=1e-2),
+        self.model.compile(optimizer=optimizers.Adam(learning_rate=5e-1),
                            loss=Net.mse,
                            loss_weights={'conv1_aux': 0.1, 'conv2_aux': 0.2, 'conv3_aux': 0.3, 'conv4_aux': 0.4, 'conv5_aux': 0.6, 'decoder': 1})
 

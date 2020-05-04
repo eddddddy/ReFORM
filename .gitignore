@@ -4,6 +4,9 @@ embed_data/
 spectrogram_data/
 logs/
 checkpoints/
+api_key
+cache/
+data/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
