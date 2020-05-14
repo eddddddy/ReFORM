@@ -7,8 +7,9 @@ import numpy as np
 
 from constants import *
 import generate
+import serialize
 
-tf.compat.v1.disable_eager_execution()
+#tf.compat.v1.disable_eager_execution()
 
 gpus = tf.config.experimental.list_physical_devices('GPU')
 try:
@@ -28,15 +29,6 @@ def train_data_loader(repeat=1):
         except EOFError:
             pass
             
-            
-def split_train_data_loader(filename):
-    with open(filename, 'rb') as f:
-        try:
-            while True:
-                data = pickle.load(f)
-        except EOFError:
-            pass
-
 
 def ConvBN(*args, **kwargs):
     def _ConvBN(model, training=True):
@@ -60,8 +52,8 @@ def ConvTransposeBN(*args, **kwargs):
 
 class Net:
     NUM_EPOCHS = 10000
-    STEPS_PER_EPOCH = 128
-    BATCH_SIZE_PRETRAIN = 256
+    STEPS_PER_EPOCH = 64
+    BATCH_SIZE_TRAIN = 16
     BATCH_SIZE_CLUSTER = 32
 
     def __init__(self):
@@ -91,87 +83,79 @@ class Net:
         return tf.reduce_sum(tf.math.square(y_pred - y_true), axis=[1, 2])
 
     @staticmethod
-    def get_pretrain_dataset():
-        def __slice_n_dice(data, length):
-            data_offset = tf.random.uniform([], 0, length - NUM_FRAMES + 1, dtype=tf.int32)
-            new_data = data[data_offset: data_offset + NUM_FRAMES]
-            return new_data, {'conv1_aux': new_data, 'conv2_aux': new_data, 'conv3_aux': new_data, 'conv4_aux': new_data, 'conv5_aux': new_data, 'decoder': new_data}
-
-        data = list(train_data_loader())
-        lengths = np.array([len(d) for d in data])
-        for i in range(len(data)):
-            data[i] = np.pad(data[i], [(0, 35000 - len(data[i])), (0, 0)])
-        data = np.array(data)
-
-        data = tf.convert_to_tensor(data[100:])
-        lengths = tf.convert_to_tensor(lengths[100:])
-
-        '''data1 = tf.convert_to_tensor(data[:100])
-        lengths1 = tf.convert_to_tensor(lengths[:100])
-        data2 = tf.convert_to_tensor(data[100:])
-        lengths2 = tf.convert_to_tensor(lengths[100:])'''
-
-        '''dataset1 = tf.data.Dataset.range(8).interleave(
-            lambda x: tf.data.Dataset.zip((
-                tf.data.Dataset.from_tensor_slices(data1[x::8]),
-                tf.data.Dataset.from_tensor_slices(lengths1[x::8])
-            )),
-            cycle_length=8,
-            num_parallel_calls=8
-        )
-        dataset2 = tf.data.Dataset.range(8).interleave(
-            lambda x: tf.data.Dataset.zip((
-                tf.data.Dataset.from_tensor_slices(data2[x::8]),
-                tf.data.Dataset.from_tensor_slices(lengths2[x::8])
-            )),
-            cycle_length=8,
-            num_parallel_calls=8
-        )'''
-        dataset = tf.data.Dataset.range(4).interleave(
-            lambda x: tf.data.Dataset.zip((
-                tf.data.Dataset.from_tensor_slices(data[x::8]),
-                tf.data.Dataset.from_tensor_slices(lengths[x::8])
-            )),
-            cycle_length=4,
-            num_parallel_calls=4
-        )
-        #dataset = dataset1.concatenate(dataset2)
-        dataset = dataset.repeat()
-        dataset = dataset.map(__slice_n_dice, num_parallel_calls=tf.data.experimental.AUTOTUNE)
-        dataset = dataset.batch(Net.BATCH_SIZE_PRETRAIN)
-        dataset = dataset.prefetch(Net.BATCH_SIZE_PRETRAIN * 4)
-
-        return dataset
-    
-    @staticmethod
-    def get_pretrain_dataset_new():
+    def get_train_dataset():
         def slice_n_dice(data):
             data_offset = tf.random.uniform([], 0, len(data) - NUM_FRAMES + 1, dtype=tf.int32)
             new_data = data[data_offset: data_offset + NUM_FRAMES]
             return new_data, new_data
-            
-        def dataset_from_filename(filename):
-            return tf.data.Dataset.from_generator(
-                split_train_data_loader,
-                output_types=tf.float64,
-                output_shapes=tf.TensorShape([None, NUM_BINS]),
-                args=(filename,)
-            )
         
-        train_files = [generate.get_nth_train_filepath(i) for i in range(generate.NUM_THREADS)]
+        train_files = [serialize.get_nth_serialized_train_filepath(i) for i in range(generate.NUM_THREADS)]
+
         dataset = tf.data.Dataset.from_tensor_slices(train_files)
-        dataset = dataset.interleave(dataset_from_filename, cycle_length=generate.NUM_THREADS)
+        dataset = dataset.interleave(
+            lambda filename: tf.data.TFRecordDataset(filename),
+            cycle_length=generate.NUM_THREADS,
+            deterministic=False
+        ).map(serialize.decode)
+        
         dataset = dataset.repeat()
-        dataset = dataset.shuffle(Net.BATCH_SIZE_PRETRAIN * 4)
+        dataset = dataset.shuffle(Net.BATCH_SIZE_TRAIN * 2)
         dataset = dataset.map(slice_n_dice)
-        dataset = dataset.batch(Net.BATCH_SIZE_PRETRAIN)
-        dataset = dataset.prefetch(Net.BATCH_SIZE_PRETRAIN * 4)
+        dataset = dataset.batch(Net.BATCH_SIZE_TRAIN)
+        dataset = dataset.prefetch(Net.BATCH_SIZE_TRAIN)
         
         return dataset
 
     @staticmethod
     def input_layer():
         return layers.Input(shape=(NUM_FRAMES, NUM_BINS), name='input')
+        
+    @staticmethod
+    def encoder_conv(model, filters, kernel_size, strides, tag, padding='same', training=True):
+        model = layers.Conv1D(filters, kernel_size, strides=strides, padding=padding, name=f'conv_encoder_{tag}')(model)
+        model = layers.BatchNormalization(axis=-1, trainable=training, name=f'bn_encoder_{tag}')(model, training=training)
+        model = layers.ReLU()(model)
+        return model
+        
+    @staticmethod
+    def decoder_conv(model, filters, kernel_size, strides, tag, padding='same', training=True):
+        model = layers.UpSampling1D(strides)(model)
+        model = layers.Conv1D(filters, kernel_size, padding=padding, name=f'conv_decoder_{tag}')(model)
+        model = layers.BatchNormalization(axis=-1, trainable=training, name=f'bn_decoder_{tag}')(model, training=training)
+        model = layers.ReLU()(model)
+        return model
+        
+    def construct_for_training(self):
+        net_input = Net.input_layer()
+        model = net_input
+        
+        model = Net.encoder_conv(model, 256, 11, 5, 'conv_1')
+        model = Net.encoder_conv(model, 384, 9, 4, 'conv_2')
+        model = Net.encoder_conv(model, 512, 7, 3, 'conv_3')
+        model = Net.encoder_conv(model, 512, 5, 2, 'conv_4')
+        model = Net.encoder_conv(model, 512, 5, 2, 'conv_5')
+        model = Net.encoder_conv(model, 512, 3, 1, 'conv_6', padding='valid')
+        model = Net.encoder_conv(model, 768, 2, 1, 'conv_7', padding='valid')
+        
+        model = layers.Reshape((768,))(model)
+        model = layers.Dense(512, name='dense1')(model)
+        model = layers.Dense(768, activation='relu', name='dense2')(model)
+        model = layers.Reshape((1, 768))(model)
+        
+        model = Net.decoder_conv(model, 512, 3, 2, 'dconv_1')
+        model = Net.decoder_conv(model, 512, 3, 2, 'dconv_2')
+        model = Net.decoder_conv(model, 512, 5, 2, 'dconv_3')
+        model = Net.decoder_conv(model, 512, 5, 2, 'dconv_4')
+        model = Net.decoder_conv(model, 384, 7, 3, 'dconv_5')
+        model = Net.decoder_conv(model, 256, 9, 4, 'dconv_6')
+        
+        model = layers.UpSampling1D(5)(model)
+        model = layers.Conv1D(128, 11, activation='sigmoid', padding='same', name='dconv_7')(model)
+        
+        net_outputs = model
+        
+        self.model = models.Model(inputs=net_input, outputs=net_outputs)
+        self.model.compile(optimizer=optimizers.Adam(learning_rate=3e-4), loss=Net.mse)
 
     def construct_for_pretraining(self):
         net_input = Net.input_layer()
@@ -274,6 +258,28 @@ class Net:
     def predict(self, x):
         return self.model.predict(x)
 
+    def train(self):
+        dataset = Net.get_train_dataset()
+        
+        checkpoint_callback = callbacks.ModelCheckpoint(
+            os.path.join(os.path.dirname(__file__), 'checkpoints', 'weights-epoch{epoch:05d}-loss{loss:.2f}.hdf5'),
+            monitor='loss',
+            save_best_only=True,
+            save_weights_only=True
+        )
+        
+        tensorboard_callback = callbacks.TensorBoard(
+            log_dir='logs',
+            write_graph=False,
+            profile_batch=10
+        )
+        
+        self.model.fit(x=dataset,
+                       epochs=Net.NUM_EPOCHS,
+                       steps_per_epoch=Net.STEPS_PER_EPOCH,
+                       callbacks=[checkpoint_callback, tensorboard_callback],
+                       verbose=1)
+        
     def pretrain(self):
         def __slice_n_dice(data):
             data_offset = tf.random.uniform([], 0, len(data) - NUM_FRAMES + 1, dtype=tf.int32)
@@ -351,16 +357,15 @@ class Net:
 def main():
     net = Net()
 
-    net.construct_for_pretraining()
-    tf.keras.utils.plot_model(net.model, to_file='model_pretrain.png', show_shapes=True)
-    net.construct_for_pretraining()
-    net.pretrain()
+    net.construct_for_training()
+    tf.keras.utils.plot_model(net.model, to_file='model_train.png', show_shapes=True)
+    net.train()
 
-    net.construct_for_clustering()
-    tf.keras.utils.plot_model(net.model, to_file='model_cluster.png', show_shapes=True)
+    #net.construct_for_clustering()
+    #tf.keras.utils.plot_model(net.model, to_file='model_cluster.png', show_shapes=True)
 
-    net.construct_for_embedding()
-    tf.keras.utils.plot_model(net.model, to_file='model_embed.png', show_shapes=True)
+    #net.construct_for_embedding()
+    #tf.keras.utils.plot_model(net.model, to_file='model_embed.png', show_shapes=True)
 
 
 if __name__ == '__main__':

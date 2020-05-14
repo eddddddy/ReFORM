@@ -14,14 +14,14 @@ import yaml
 
 import spectrogram
 
-VALIDATION_RATIO = 0.1
-DATA_PATH = "D:/Data"
+VALIDATION_RATIO = 0.00000001
+DATA_PATH = "C:/Users/Edward/Documents/Data"
 
 TRAIN_OUTPUT_FILEPATH = os.path.join(os.path.dirname(__file__), 'spectrogram_data', 'train')
 VALIDATION_OUTPUT_FILEPATH = os.path.join(os.path.dirname(__file__), 'spectrogram_data', 'validation')
 ALL_OUTPUT_FILEPATH = os.path.join(os.path.dirname(__file__), 'spectrogram_data', 'all')
 
-NUM_THREADS = 8
+NUM_THREADS = 2
 
 
 def load(file):
@@ -69,6 +69,8 @@ def generate():
     workers = []
     song_queue = multiprocessing.Queue()
     data_queue = multiprocessing.Queue()
+    
+    pathlib.Path(os.path.join(os.path.dirname(__file__), 'spectrogram_data')).mkdir(exist_ok=True)
 
     try:
         train_file = open(TRAIN_OUTPUT_FILEPATH, 'wb')
