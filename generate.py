@@ -7,6 +7,7 @@ import pickle
 import os
 import multiprocessing
 import queue
+import pathlib
 
 import numpy as np
 from scipy.io import wavfile
@@ -15,13 +16,13 @@ import yaml
 import spectrogram
 
 VALIDATION_RATIO = 0.00000001
-DATA_PATH = "C:/Users/Edward/Documents/Data"
+DATA_PATH = "D:/Data"
 
 TRAIN_OUTPUT_FILEPATH = os.path.join(os.path.dirname(__file__), 'spectrogram_data', 'train')
 VALIDATION_OUTPUT_FILEPATH = os.path.join(os.path.dirname(__file__), 'spectrogram_data', 'validation')
 ALL_OUTPUT_FILEPATH = os.path.join(os.path.dirname(__file__), 'spectrogram_data', 'all')
 
-NUM_THREADS = 2
+NUM_THREADS = 8
 
 
 def load(file):
@@ -69,7 +70,7 @@ def generate():
     workers = []
     song_queue = multiprocessing.Queue()
     data_queue = multiprocessing.Queue()
-    
+
     pathlib.Path(os.path.join(os.path.dirname(__file__), 'spectrogram_data')).mkdir(exist_ok=True)
 
     try:
@@ -86,6 +87,8 @@ def generate():
 
         for _ in range(NUM_THREADS):
             workers.append(multiprocessing.Process(target=generate_worker, args=(song_queue, data_queue)))
+
+            # why is this here? won't one of the threads just exit right away?
             song_queue.put(None)
 
         for worker in workers:
@@ -134,7 +137,7 @@ def generate():
         validation_file.close()
         all_file.close()
 
-        
+
 def split_data():
     """
     Create NUM_THREADS equal-sized training files that collectively contain
@@ -142,7 +145,7 @@ def split_data():
     """
     try:
         train_files = [open(get_nth_train_filepath(i), 'wb') for i in range(NUM_THREADS)]
-        
+
         with open(TRAIN_OUTPUT_FILEPATH, 'rb') as f:
             i = 0
             try:
@@ -154,8 +157,8 @@ def split_data():
     finally:
         for train_file in train_files:
             train_file.close()
-        
+
 
 if __name__ == '__main__':
     generate()
-    split_data()
+    #split_data()

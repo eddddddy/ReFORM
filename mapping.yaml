@@ -220,3 +220,56 @@ iu:
       rating: 2
     - name: december_24
       rating: 1
+bol4:
+  red_ickle:
+    - name: chocolate
+    - name: fight_day
+    - name: ring
+    - name: grumpy
+    - name: occasionally
+  red_planet:
+    - name: galaxy
+    - name: you_i
+    - name: hard_to_love
+    - name: freesia
+    - name: x_song
+    - name: when_you_fall_in_love
+    - name: tell_me_you_love_me
+  red_diary_page_1:
+    - name: some
+    - name: blue
+    - name: fix_me
+    - name: imagine
+    - name: to_my_youth
+  red_diary_page_2:
+    - name: wind
+    - name: travel
+    - name: starlight
+    - name: dear_teddy_bear
+    - name: clip
+    - name: lonely
+    - name: dejavu
+    - name: 6_oclock
+  puberty_book_1:
+    - name: picnic
+    - name: bom
+    - name: stars_over_me
+    - name: seattle_alone
+    - name: mermaid
+  two_five:
+    - name: workaholic
+    - name: 25
+    - name: xx
+    - name: taste
+    - name: day_off
+    - name: xx_acoustic
+  puberty_book_2:
+    - name: blank
+    - name: hug
+    - name: leo
+    - name: counselling
+    - name: dandelion
+  miscellaneous:
+    - name: first_love
+    - name: my_trouble
+    - name: you_and_me_from_the_start
