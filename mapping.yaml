@@ -1,118 +1,275 @@
 iu:
   lost_and_found:
-    - ugly_duckling
-    - lost_child
-    - you_know
-    - feel_so_good
-    - every_sweet_day
+    - name: ugly_duckling
+      rating: 0
+    - name: lost_child
+      rating: 0
+    - name: you_know
+      rating: 0
+    - name: feel_so_good
+      rating: 0
+    - name: every_sweet_day
+      rating: 0
   growing_up:
-    - looking_at_you
-    - boo
-    - pitiful
-    - a_dreamer
-    - four_without_me
-    - graduation_day
-    - face_to_face
-    - lost_child_acoustic
-    - you_know_rock
+    - name: looking_at_you
+      rating: 0
+    - name: boo
+      rating: 0
+    - name: pitiful
+      rating: 0
+    - name: a_dreamer
+      rating: 0
+    - name: four_without_me
+      rating: 0
+    - name: graduation_day
+      rating: 0
+    - name: face_to_face
+      rating: 0
+    - name: lost_child_acoustic
+      rating: 0
+    - name: you_know_rock
+      rating: 0
   iu_im:
-    - love_attack
-    - taking_a_train
-    - morning_tears
-    - heartbeating_date
+    - name: love_attack
+      rating: 0
+    - name: taking_a_train
+      rating: 1
+    - name: morning_tears
+      rating: 1
+    - name: heartbeating_date
+      rating: 0
   real:
-    - this_is_not_what_i_thought
-    - the_thing_i_do_slowly
-    - good_day
-    - the_night_of_the_first_breakup
-    - alone_in_the_room
-    - merry_christmas_in_advance
-    - the_story_only_i_didnt_know
-    - cruel_fairytale
-    - the_story_only_i_didnt_know_piano
+    - name: this_is_not_what_i_thought
+      rating: 0
+    - name: the_thing_i_do_slowly
+      rating: 1
+    - name: good_day
+      rating: 1
+    - name: the_night_of_the_first_breakup
+      rating: 1
+    - name: alone_in_the_room
+      rating: 0
+    - name: merry_christmas_in_advance
+      rating: 1
+    - name: the_story_only_i_didnt_know
+      rating: 1
+    - name: cruel_fairytale
+      rating: 0
+    - name: the_story_only_i_didnt_know_piano
+      rating: 1
   last_fantasy:
-    - secret
-    - sleeping_prince_of_the_woods
-    - child_searching_for_a_star
-    - you_and_i
-    - wallpaper_design
-    - uncle
-    - wisdom_tooth
-    - everythings_alright
-    - last_fantasy
-    - teacher
-    - lost_puppy
-    - 4_am
-    - lamant
+    - name: secret
+      rating: 1
+    - name: sleeping_prince_of_the_woods
+      rating: 1
+    - name: child_searching_for_a_star
+      rating: 1
+    - name: you_and_i
+      rating: 0
+    - name: wallpaper_design
+      rating: 1
+    - name: uncle
+      rating: 1
+    - name: wisdom_tooth
+      rating: 1
+    - name: everythings_alright
+      rating: 1
+    - name: last_fantasy
+      rating: 1
+    - name: teacher
+      rating: 0
+    - name: lost_puppy
+      rating: 1
+    - name: 4_am
+      rating: 1
+    - name: lamant
+      rating: 0
   spring_of_a_twenty_year_old:
-    - peach
-    - every_end_of_the_day
-    - i_really_dont_like_her
+    - name: peach
+      rating: 2
+    - name: every_end_of_the_day
+      rating: 1
+    - name: i_really_dont_like_her
+      rating: 0
   modern_times:
-    - friday
-    - crayon_pastels
-    - love_of_b
-    - everybody_has_secrets
-    - between_the_lips
-    - red_shoes
-    - modern_times
-    - bad_day
-    - obliviate
-    - walk_with_me_girl
-    - havana
-    - gloomy_clock
-    - daydream
-    - wait
-    - voice_mail
+    - name: friday
+      rating: 1
+    - name: crayon_pastels
+      rating: 1
+    - name: love_of_b
+      rating: 1
+    - name: everybody_has_secrets
+      rating: 1
+    - name: between_the_lips
+      rating: 1
+    - name: red_shoes
+      rating: 0
+    - name: modern_times
+      rating: 1
+    - name: bad_day
+      rating: 1
+    - name: obliviate
+      rating: 1
+    - name: walk_with_me_girl
+      rating: 0
+    - name: havana
+      rating: 0
+    - name: gloomy_clock
+      rating: 1
+    - name: daydream
+      rating: 0
+    - name: wait
+      rating: 0
+    - name: voice_mail
+      rating: 0
   flower_bookmark:
-    - my_old_story
-    - flower
-    - pierrot_smiles_at_us
-    - when_love_passes
-    - meaning_of_you
-    - summer_night_dream
-    - boom_ladi_dadi
-    - eoheoya_dunggidunggi
+    - name: my_old_story
+      rating: 1
+    - name: flower
+      rating: 1
+    - name: pierrot_smiles_at_us
+      rating: 0
+    - name: when_love_passes
+      rating: 0
+    - name: meaning_of_you
+      rating: 0
+    - name: summer_night_dream
+      rating: 0
+    - name: boom_ladi_dadi
+      rating: 0
+    - name: eoheoya_dunggidunggi
+      rating: 0
   chatshire:
-    - shoes
-    - zeze
-    - twenty_three
-    - the_shower
-    - red_queen
-    - knees
-    - glasses
-    - twenty_three_bonus_track
-    - heart
+    - name: shoes
+      rating: 1
+    - name: zeze
+      rating: 0
+    - name: twenty_three
+      rating: 1
+    - name: the_shower
+      rating: 1
+    - name: red_queen
+      rating: 0
+    - name: knees
+      rating: 1
+    - name: glasses
+      rating: 1
+    - name: twenty_three_bonus_track
+      rating: 1
+    - name: heart
+      rating: 2
   palette:
-    - dlwlrma
-    - palette
-    - ending_scene
-    - cant_love_you_anymore
-    - jam_jam
-    - black_out
-    - full_stop
-    - through_the_night
-    - love_alone
-    - dear_name
+    - name: dlwlrma
+      rating: 1
+    - name: palette
+      rating: 1
+    - name: ending_scene
+      rating: 0
+    - name: cant_love_you_anymore
+      rating: 0
+    - name: jam_jam
+      rating: 1
+    - name: black_out
+      rating: 0
+    - name: full_stop
+      rating: 0
+    - name: through_the_night
+      rating: 1
+    - name: love_alone
+      rating: 0
+    - name: dear_name
+      rating: 1
   flower_bookmark_2:
-    - autumn_morning
-    - secret_garden
-    - sleepless_rainy_night
-    - last_night_story
-    - by_the_stream
-    - everyday_with_you
-    - with_the_heart_to_forget_you
+    - name: autumn_morning
+      rating: 1
+    - name: secret_garden
+      rating: 1
+    - name: sleepless_rainy_night
+      rating: 1
+    - name: last_night_story
+      rating: 1
+    - name: by_the_stream
+      rating: 1
+    - name: everyday_with_you
+      rating: 1
+    - name: with_the_heart_to_forget_you
+      rating: 1
   love_poem:
-    - unlucky
-    - the_visitor
-    - blueming
-    - above_the_time
-    - lullaby
-    - love_poem
+    - name: unlucky
+      rating: 1
+    - name: the_visitor
+      rating: 1
+    - name: blueming
+      rating: 1
+    - name: above_the_time
+      rating: 1
+    - name: lullaby
+      rating: 0
+    - name: love_poem
+      rating: 1
   miscellaneous:
-    - raindrop
-    - nagging
-    - untitled_song
-    - station
-    - fifth_finger
-    - december_24
+    - name: raindrop
+      rating: 1
+    - name: nagging
+      rating: 1
+    - name: untitled_song
+      rating: 2
+    - name: station
+      rating: 2
+    - name: fifth_finger
+      rating: 2
+    - name: december_24
+      rating: 1
+bol4:
+  red_ickle:
+    - name: chocolate
+    - name: fight_day
+    - name: ring
+    - name: grumpy
+    - name: occasionally
+  red_planet:
+    - name: galaxy
+    - name: you_i
+    - name: hard_to_love
+    - name: freesia
+    - name: x_song
+    - name: when_you_fall_in_love
+    - name: tell_me_you_love_me
+  red_diary_page_1:
+    - name: some
+    - name: blue
+    - name: fix_me
+    - name: imagine
+    - name: to_my_youth
+  red_diary_page_2:
+    - name: wind
+    - name: travel
+    - name: starlight
+    - name: dear_teddy_bear
+    - name: clip
+    - name: lonely
+    - name: dejavu
+    - name: 6_oclock
+  puberty_book_1:
+    - name: picnic
+    - name: bom
+    - name: stars_over_me
+    - name: seattle_alone
+    - name: mermaid
+  two_five:
+    - name: workaholic
+    - name: 25
+    - name: xx
+    - name: taste
+    - name: day_off
+    - name: xx_acoustic
+  puberty_book_2:
+    - name: blank
+    - name: hug
+    - name: leo
+    - name: counselling
+    - name: dandelion
+  miscellaneous:
+    - name: first_love
+    - name: my_trouble
+    - name: you_and_me_from_the_start
