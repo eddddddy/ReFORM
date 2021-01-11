@@ -87,8 +87,6 @@ def generate():
 
         for _ in range(NUM_THREADS):
             workers.append(multiprocessing.Process(target=generate_worker, args=(song_queue, data_queue)))
-
-            # why is this here? won't one of the threads just exit right away?
             song_queue.put(None)
 
         for worker in workers:
