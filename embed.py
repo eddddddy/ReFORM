@@ -146,34 +146,3 @@ def get_latent_vectors():
             vectors = np.vstack([vectors, embeddings])
         labels.extend([name] * len(embeddings))
     return vectors, labels
-
-
-def sum_pairwise_distances(v1, v2):
-    u1 = np.lib.stride_tricks.as_strided(
-        v1,
-        (v1.shape[0], v2.shape[0], v1.shape[1]),
-        (v1.strides[0], 0, v1.strides[1])).reshape((-1, v1.shape[1]))
-    u2 = np.lib.stride_tricks.as_strided(
-        v2,
-        (v1.shape[0], v2.shape[0], v2.shape[1]),
-        (0, v2.strides[0], v2.strides[1])).reshape((-1, v2.shape[1]))
-
-    return np.sum(np.power(np.sum(np.power(np.abs(u1 - u2), 0.2), axis=1), 5))
-
-
-def centroid_distance(v1, v2):
-    return np.sqrt(np.sum(np.power(np.abs(np.mean(v1, axis=0) - np.mean(v2, axis=0)), 2)))
-
-
-def compute_similarity(vectors1, vectors2):
-    return centroid_distance(vectors1, vectors2)
-    # norm = (sum_pairwise_distances(vectors1, vectors1) + sum_pairwise_distances(vectors2, vectors2)) / 2
-    # return norm / total
-
-
-def compute_similarities(vectors):
-    similarities = []
-    for name in os.listdir(os.path.join(os.path.dirname(__file__), 'embed_data')):
-        similarities.append([name, compute_similarity(vectors, load_embeddings(name))])
-    similarities = sorted(similarities, key=lambda p: p[1])
-    return similarities

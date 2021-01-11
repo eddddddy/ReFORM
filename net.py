@@ -6,8 +6,10 @@ from tensorflow.keras import layers, models, optimizers, backend, callbacks
 import numpy as np
 
 from constants import *
+import generate
+import serialize
 
-tf.compat.v1.disable_eager_execution()
+# tf.compat.v1.disable_eager_execution()
 
 gpus = tf.config.experimental.list_physical_devices('GPU')
 try:
@@ -18,12 +20,21 @@ except RuntimeError as e:
 
 
 def train_data_loader(repeat=1):
-    with open(os.path.join(os.path.dirname(__file__), 'spectrogram_data', 'train'), 'rb') as f:
+    with open(generate.TRAIN_OUTPUT_FILEPATH, 'rb') as f:
         try:
             while True:
                 data = pickle.load(f)
                 for _ in range(repeat):
                     yield data
+        except EOFError:
+            pass
+
+
+def split_train_data_loader(filename):
+    with open(filename, 'rb') as f:
+        try:
+            while True:
+                yield pickle.load(f)
         except EOFError:
             pass
 
@@ -50,8 +61,8 @@ def ConvTransposeBN(*args, **kwargs):
 
 class Net:
     NUM_EPOCHS = 10000
-    STEPS_PER_EPOCH = 128
-    BATCH_SIZE_PRETRAIN = 256
+    STEPS_PER_EPOCH = 512 * 4
+    BATCH_SIZE_TRAIN = 256
     BATCH_SIZE_CLUSTER = 32
 
     def __init__(self):
@@ -81,8 +92,144 @@ class Net:
         return tf.reduce_sum(tf.math.square(y_pred - y_true), axis=[1, 2])
 
     @staticmethod
+    def get_train_dataset():
+        def slice_n_dice(data):
+            data_offset = tf.random.uniform([], 0, len(data) - NUM_FRAMES + 1, dtype=tf.int32)
+            new_data = data[data_offset: data_offset + NUM_FRAMES]
+            return new_data, new_data
+
+        train_files = [serialize.get_nth_serialized_train_filepath(i) for i in range(generate.NUM_THREADS)]
+
+        dataset = tf.data.Dataset.from_tensor_slices(train_files)
+
+        '''dataset = dataset.interleave(
+            lambda filename: tf.data.TFRecordDataset(filename),
+            num_parallel_calls=generate.NUM_THREADS,
+            #deterministic=False
+        ).map(serialize.decode).cache()'''
+
+        dataset = tf.data.Dataset.from_generator(train_data_loader,
+                                                 output_types=tf.float64,
+                                                 output_shapes=tf.TensorShape([None, NUM_BINS]))
+        dataset = dataset.cache()
+
+        dataset = dataset.repeat()
+        dataset = dataset.map(slice_n_dice, num_parallel_calls=8)
+        dataset = dataset.shuffle(Net.BATCH_SIZE_TRAIN * 2)
+        dataset = dataset.batch(Net.BATCH_SIZE_TRAIN)
+        dataset = dataset.prefetch(Net.BATCH_SIZE_TRAIN * 2)
+
+        return dataset
+
+    @staticmethod
     def input_layer():
         return layers.Input(shape=(NUM_FRAMES, NUM_BINS), name='input')
+
+    @staticmethod
+    def encoder_conv(model, filters, kernel_size, strides, tag, padding='same', training=True):
+        # if can't load previous checkpoints, swap back the batch norm and relu layers (in decoder_conv too)
+
+        model = layers.Conv1D(filters, kernel_size, strides=strides, padding=padding, name=f'conv_encoder_{tag}')(model)
+        model = layers.BatchNormalization(axis=-1, trainable=training, name=f'bn_encoder_{tag}')(model, training=training)
+        model = layers.ReLU()(model)
+        return model
+
+    @staticmethod
+    def decoder_conv(model, filters, kernel_size, strides, tag, padding='same', training=True):
+        model = layers.UpSampling1D(strides)(model)
+        model = layers.Conv1D(filters, kernel_size, padding=padding, name=f'conv_decoder_{tag}')(model)
+        model = layers.BatchNormalization(axis=-1, trainable=training, name=f'bn_decoder_{tag}')(model, training=training)
+        model = layers.ReLU()(model)
+        return model
+
+    @staticmethod
+    def get_optimizer():
+        # relu -> batch norm
+        # lr = 1e-3
+
+        # batch norm -> relu
+        # lr = 3e-5
+
+        # small architecture adam
+        lr = 1e-3
+
+        return optimizers.Adam(learning_rate=lr)
+
+    def construct_for_training(self):
+        net_input = Net.input_layer()
+        model = net_input
+
+        model = Net.encoder_conv(model, 96, 9, 4, 'conv_1')
+        model = Net.encoder_conv(model, 96, 7, 3, 'conv_2')
+        model = Net.encoder_conv(model, 128, 3, 1, 'conv_3')
+        model = layers.MaxPool1D()(model)
+        model = Net.encoder_conv(model, 128, 3, 1, 'conv_4')
+        model = layers.MaxPool1D()(model)
+
+        model = Net.decoder_conv(model, 128, 3, 2, 'dconv_1')
+        model = Net.decoder_conv(model, 96, 3, 2, 'dconv_2')
+        model = Net.decoder_conv(model, 96, 7, 3, 'dconv_3')
+
+        model = layers.UpSampling1D(4)(model)
+        model = layers.Conv1D(128, 9, activation='sigmoid', padding='same', name='dconv_4')(model)
+
+        '''model = Net.encoder_conv(model, 256, 11, 5, 'conv_1')
+        model = Net.encoder_conv(model, 384, 9, 4, 'conv_2')
+        model = Net.encoder_conv(model, 512, 7, 3, 'conv_3')
+        model = Net.encoder_conv(model, 512, 5, 2, 'conv_4')
+        model = Net.encoder_conv(model, 512, 5, 2, 'conv_5')
+        model = Net.encoder_conv(model, 512, 3, 1, 'conv_6', padding='valid')
+        model = Net.encoder_conv(model, 768, 2, 1, 'conv_7', padding='valid')
+
+        model = layers.Reshape((768,))(model)
+        model = layers.Dense(512, name='dense1')(model)
+        model = layers.Dense(768, activation='relu', name='dense2')(model)
+        model = layers.Reshape((1, 768))(model)
+
+        model = Net.decoder_conv(model, 512, 3, 2, 'dconv_1')
+        model = Net.decoder_conv(model, 512, 3, 2, 'dconv_2')
+        model = Net.decoder_conv(model, 512, 5, 2, 'dconv_3')
+        model = Net.decoder_conv(model, 512, 5, 2, 'dconv_4')
+        model = Net.decoder_conv(model, 384, 7, 3, 'dconv_5')
+        model = Net.decoder_conv(model, 256, 9, 4, 'dconv_6')
+
+        model = layers.UpSampling1D(5)(model)
+        model = layers.Conv1D(128, 11, activation='sigmoid', padding='same', name='dconv_7')(model)'''
+
+        net_outputs = model
+
+        self.model = models.Model(inputs=net_input, outputs=net_outputs)
+        self.model.compile(optimizer=Net.get_optimizer(), loss=Net.mse)
+
+    def construct_for_visualizing(self):
+        net_input = Net.input_layer()
+        model = net_input
+
+        model = Net.encoder_conv(model, 256, 11, 5, 'conv_1', training=False)
+        model = Net.encoder_conv(model, 384, 9, 4, 'conv_2', training=False)
+        model = Net.encoder_conv(model, 512, 7, 3, 'conv_3', training=False)
+        model = Net.encoder_conv(model, 512, 5, 2, 'conv_4', training=False)
+        model = Net.encoder_conv(model, 512, 5, 2, 'conv_5', training=False)
+        model = Net.encoder_conv(model, 512, 3, 1, 'conv_6', padding='valid', training=False)
+        model = Net.encoder_conv(model, 768, 2, 1, 'conv_7', padding='valid', training=False)
+
+        model = layers.Reshape((768,))(model)
+        model = layers.Dense(512, name='dense1')(model)
+        model = layers.Dense(768, activation='relu', name='dense2')(model)
+        model = layers.Reshape((1, 768))(model)
+
+        model = Net.decoder_conv(model, 512, 3, 2, 'dconv_1', training=False)
+        model = Net.decoder_conv(model, 512, 3, 2, 'dconv_2', training=False)
+        model = Net.decoder_conv(model, 512, 5, 2, 'dconv_3', training=False)
+        model = Net.decoder_conv(model, 512, 5, 2, 'dconv_4', training=False)
+        model = Net.decoder_conv(model, 384, 7, 3, 'dconv_5', training=False)
+        model = Net.decoder_conv(model, 256, 9, 4, 'dconv_6', training=False)
+
+        model = layers.UpSampling1D(5)(model)
+        model = layers.Conv1D(128, 11, activation='sigmoid', padding='same', name='dconv_7')(model)
+
+        net_outputs = model
+        self.model = models.Model(inputs=net_input, outputs=net_outputs)
 
     def construct_for_pretraining(self):
         net_input = Net.input_layer()
@@ -130,7 +277,7 @@ class Net:
         net_outputs = [conv1_aux, conv2_aux, conv3_aux, conv4_aux, conv5_aux, decoder]
 
         self.model = models.Model(inputs=net_input, outputs=net_outputs)
-        self.model.compile(optimizer=optimizers.Adam(learning_rate=1e-2),
+        self.model.compile(optimizer=optimizers.Adam(learning_rate=5e-1),
                            loss=Net.mse,
                            loss_weights={'conv1_aux': 0.1, 'conv2_aux': 0.2, 'conv3_aux': 0.3, 'conv4_aux': 0.4, 'conv5_aux': 0.6, 'decoder': 1})
 
@@ -166,17 +313,20 @@ class Net:
 
     def construct_for_embedding(self):
         net_input = Net.input_layer()
-        model = layers.Reshape((NUM_FRAMES, NUM_BINS, 1))(net_input)
+        model = net_input
 
-        model = ConvBN(64, (11, 9), strides=(5, 4), padding='same', name='1')(model, training=False)
-        model = ConvBN(128, (9, 5), strides=(4, 2), padding='same', name='2')(model, training=False)
-        model = ConvBN(256, (9, 5), strides=(4, 2), padding='same', name='3')(model, training=False)
-        model = ConvBN(384, (5, 5), strides=(2, 2), padding='same', name='4')(model, training=False)
-        model = ConvBN(512, (5, 5), strides=(2, 2), padding='same', name='5')(model, training=False)
-        model = ConvBN(768, (5, 5), strides=(2, 2), padding='same', name='6')(model, training=False)
+        model = Net.encoder_conv(model, 256, 11, 5, 'conv_1', training=False)
+        model = Net.encoder_conv(model, 384, 9, 4, 'conv_2', training=False)
+        model = Net.encoder_conv(model, 512, 7, 3, 'conv_3', training=False)
+        model = Net.encoder_conv(model, 512, 5, 2, 'conv_4', training=False)
+        model = Net.encoder_conv(model, 512, 5, 2, 'conv_5', training=False)
+        model = Net.encoder_conv(model, 512, 3, 1, 'conv_6', padding='valid', training=False)
+        model = Net.encoder_conv(model, 768, 2, 1, 'conv_7', padding='valid', training=False)
 
-        net_output = layers.Reshape((NUM_FRAMES * NUM_BINS * 3 // 320,), name='embedded')(model)
+        model = layers.Reshape((768,))(model)
+        model = layers.Dense(512, name='dense1')(model)
 
+        net_output = model
         self.model = models.Model(inputs=net_input, outputs=net_output)
 
     def load_weights(self, filepath):
@@ -184,6 +334,28 @@ class Net:
 
     def predict(self, x):
         return self.model.predict(x)
+
+    def train(self):
+        dataset = Net.get_train_dataset()
+
+        checkpoint_callback = callbacks.ModelCheckpoint(
+            os.path.join(os.path.dirname(__file__), 'checkpoints', 'weights-epoch{epoch:05d}-loss{loss:.2f}.hdf5'),
+            monitor='loss',
+            save_best_only=True,
+            save_weights_only=True
+        )
+
+        tensorboard_callback = callbacks.TensorBoard(
+            log_dir='logs',
+            write_graph=False,
+            profile_batch=10
+        )
+
+        self.model.fit(x=dataset,
+                       epochs=Net.NUM_EPOCHS,
+                       steps_per_epoch=Net.STEPS_PER_EPOCH,
+                       callbacks=[checkpoint_callback],
+                       verbose=1)
 
     def pretrain(self):
         def __slice_n_dice(data):
@@ -196,11 +368,13 @@ class Net:
             output_types=tf.float64,
             output_shapes=tf.TensorShape([None, NUM_BINS])
         )
-        train_dataset = train_dataset.shuffle(Net.BATCH_SIZE_PRETRAIN * 4)
+        # train_dataset = train_dataset.shuffle(Net.BATCH_SIZE_PRETRAIN * 4)
         train_dataset = train_dataset.repeat()
         train_dataset = train_dataset.map(__slice_n_dice, num_parallel_calls=tf.data.experimental.AUTOTUNE)
         train_dataset = train_dataset.batch(Net.BATCH_SIZE_PRETRAIN)
         train_dataset = train_dataset.prefetch(Net.BATCH_SIZE_PRETRAIN * 4)
+
+        # train_dataset = Net.get_pretrain_dataset()
 
         checkpoint_callback = callbacks.ModelCheckpoint(
             os.path.join(os.path.dirname(__file__), 'checkpoints', 'weights-pretrain.hdf5'),
@@ -260,14 +434,16 @@ class Net:
 def main():
     net = Net()
 
-    net.construct_for_pretraining()
-    tf.keras.utils.plot_model(net.model, to_file='model_pretrain.png', show_shapes=True)
+    net.construct_for_training()
+    tf.keras.utils.plot_model(net.model, to_file='model_train.png', show_shapes=True)
+    net.load_weights('checkpoints/weights-epoch00062-loss554.56.hdf5')
+    net.train()
 
-    net.construct_for_clustering()
-    tf.keras.utils.plot_model(net.model, to_file='model_cluster.png', show_shapes=True)
+    # net.construct_for_clustering()
+    # tf.keras.utils.plot_model(net.model, to_file='model_cluster.png', show_shapes=True)
 
-    net.construct_for_embedding()
-    tf.keras.utils.plot_model(net.model, to_file='model_embed.png', show_shapes=True)
+    # net.construct_for_embedding()
+    # tf.keras.utils.plot_model(net.model, to_file='model_embed.png', show_shapes=True)
 
 
 if __name__ == '__main__':
